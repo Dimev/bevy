@@ -1,6 +1,16 @@
 use std::borrow::Cow;
 
-use crate::{archetype::{Archetype, ArchetypeComponentId, ArchetypeGeneration, ArchetypeId}, component::ComponentId, prelude::{System, World}, query::Access, system::{ReadOnlySystemParamFetch, SystemId, SystemMeta, SystemParam, SystemParamFetch, SystemParamItem, SystemParamState}, world::WorldId};
+use crate::{
+    archetype::{Archetype, ArchetypeComponentId, ArchetypeGeneration, ArchetypeId},
+    component::ComponentId,
+    prelude::{System, World},
+    query::Access,
+    system::{
+        ReadOnlySystemParamFetch, SystemId, SystemMeta, SystemParam, SystemParamFetch,
+        SystemParamItem, SystemParamState,
+    },
+    world::WorldId,
+};
 
 // TODO: Actually use this in FunctionSystem. We should probably only do this once Systems are constructed using a World reference
 // (to avoid the need for unwrapping to retrieve SystemMeta)

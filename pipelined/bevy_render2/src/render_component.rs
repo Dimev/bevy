@@ -5,7 +5,11 @@ use crate::{
 };
 use bevy_app::{App, Plugin};
 use bevy_asset::{Asset, Handle};
-use bevy_ecs::{component::Component, prelude::*, query::{Fetch, FilterFetch, WorldQuery}};
+use bevy_ecs::{
+    component::Component,
+    prelude::*,
+    query::{Fetch, FilterFetch, WorldQuery},
+};
 use crevice::std140::AsStd140;
 use std::{marker::PhantomData, ops::Deref};
 
@@ -47,13 +51,11 @@ impl<C: RenderComponent + AsStd140 + Clone> Plugin for UniformComponentPlugin<C>
     }
 }
 
-pub struct ComponentUniforms<C: RenderComponent + AsStd140>
-{
+pub struct ComponentUniforms<C: RenderComponent + AsStd140> {
     uniforms: DynamicUniformVec<C>,
 }
 
-impl<C: RenderComponent + AsStd140> Deref for ComponentUniforms<C>
-{
+impl<C: RenderComponent + AsStd140> Deref for ComponentUniforms<C> {
     type Target = DynamicUniformVec<C>;
 
     #[inline]
@@ -62,16 +64,14 @@ impl<C: RenderComponent + AsStd140> Deref for ComponentUniforms<C>
     }
 }
 
-impl<C: RenderComponent + AsStd140> ComponentUniforms<C>
-{
+impl<C: RenderComponent + AsStd140> ComponentUniforms<C> {
     #[inline]
     pub fn uniforms(&self) -> &DynamicUniformVec<C> {
         &self.uniforms
     }
 }
 
-impl<C: RenderComponent + AsStd140> Default for ComponentUniforms<C>
-{
+impl<C: RenderComponent + AsStd140> Default for ComponentUniforms<C> {
     fn default() -> Self {
         Self {
             uniforms: Default::default(),
@@ -96,9 +96,7 @@ fn prepare_uniform_components<C: RenderComponent>(
         commands
             .get_or_spawn(entity)
             .insert(DynamicUniformIndex::<C> {
-                index: component_uniforms
-                    .uniforms
-                    .push(component.clone()),
+                index: component_uniforms.uniforms.push(component.clone()),
                 marker: PhantomData,
             });
     }
@@ -114,7 +112,10 @@ impl<C, F> Default for RenderComponentPlugin<C, F> {
     }
 }
 
-impl<C: RenderComponent, F: WorldQuery + 'static> Plugin for RenderComponentPlugin<C, F> where F::Fetch: FilterFetch  {
+impl<C: RenderComponent, F: WorldQuery + 'static> Plugin for RenderComponentPlugin<C, F>
+where
+    F::Fetch: FilterFetch,
+{
     fn build(&self, app: &mut App) {
         let render_app = app.sub_app_mut(0);
         render_app.add_system_to_stage(
@@ -127,7 +128,9 @@ impl<C: RenderComponent, F: WorldQuery + 'static> Plugin for RenderComponentPlug
 fn extract_render_components<C: RenderComponent, F: WorldQuery>(
     mut commands: Commands,
     components: Query<(Entity, &C::SourceComponent), F>,
-) where F::Fetch: FilterFetch {
+) where
+    F::Fetch: FilterFetch,
+{
     for (entity, component) in components.iter() {
         commands
             .get_or_spawn(entity)

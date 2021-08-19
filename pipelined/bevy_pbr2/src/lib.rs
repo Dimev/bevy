@@ -1,4 +1,5 @@
 mod bundle;
+mod global_illumination;
 mod light;
 mod material;
 mod render;

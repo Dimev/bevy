@@ -727,10 +727,7 @@ pub struct DrawShadowMesh {
         SRes<LightMeta>,
         SRes<MeshMeta>,
         SRes<RenderAssets<Mesh>>,
-        SQuery<(
-            Read<DynamicUniformIndex<MeshTransform>>,
-            Read<Handle<Mesh>>,
-        )>,
+        SQuery<(Read<DynamicUniformIndex<MeshTransform>>, Read<Handle<Mesh>>)>,
         SQuery<Read<ViewUniformOffset>>,
     )>,
 }

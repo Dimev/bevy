@@ -105,7 +105,6 @@ impl RenderPipelineBundle {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub struct CompiledRenderPipelineBundle {
     vertex: CompiledVertexDescriptor,

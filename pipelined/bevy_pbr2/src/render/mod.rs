@@ -1,3 +1,4 @@
+mod global_illumination;
 mod light;
 
 use std::ops::Deref;
@@ -444,10 +445,10 @@ pub fn queue_transform_bind_group(
 ) {
     if let Some(buffer) = transform_uniforms.uniforms().uniform_buffer() {
         mesh_meta.mesh_transform_bind_group.next_frame();
-        mesh_meta.mesh_transform_bind_group_key =
-            Some(mesh_meta.mesh_transform_bind_group.get_or_insert_with(
-                buffer.id(),
-                || {
+        mesh_meta.mesh_transform_bind_group_key = Some(
+            mesh_meta
+                .mesh_transform_bind_group
+                .get_or_insert_with(buffer.id(), || {
                     render_device.create_bind_group(&BindGroupDescriptor {
                         entries: &[BindGroupEntry {
                             binding: 0,
@@ -457,8 +458,8 @@ pub fn queue_transform_bind_group(
                         // TODO: store this layout elsewhere
                         layout: &pbr_pipeline.mesh_layout,
                     })
-                },
-            ));
+                }),
+        );
     }
 }
 

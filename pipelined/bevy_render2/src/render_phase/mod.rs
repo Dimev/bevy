@@ -12,9 +12,7 @@ pub struct RenderPhase<I: PhaseItem> {
 
 impl<I: PhaseItem> Default for RenderPhase<I> {
     fn default() -> Self {
-        Self {
-            items: Vec::new(),
-        }
+        Self { items: Vec::new() }
     }
 }
 
