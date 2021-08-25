@@ -14,6 +14,7 @@ pub struct ExtractedGiVolume {
     transform: Mat4,
 }
 
+// this contains everything needed for one entire volume, including lods
 #[repr(C)]
 #[derive(Copy, Clone, AsStd140, Default, Debug)]
 pub struct GpuGiVolume {
