@@ -38,10 +38,8 @@ pub struct GpuMipMap {
 
 pub struct VoxelizePipeline {
 	shader_module: ShaderModule,
-	clear_pipeline: ComputePipeline,
 	voxelize_pipeline: ComputePipeline,
 	mipmap_pipeline: ComputePipeline,
-	clear_layout: BindGroupLayout,
 	voxelize_layout: BindGroupLayout,
 	mipmap_layout: BindGroupLayout,
 	volume_texture_sampler: Sampler,
@@ -63,25 +61,6 @@ impl FromWorld for VoxelizePipeline {
 			.unwrap();
 
 		let shader_module = render_device.create_shader_module(&shader);
-
-		// for clearing the texture before next frame
-		let clear_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-			entries: &[
-				// this one only needs the texture to write to
-				BindGroupLayoutEntry {
-					binding: 0,
-					visibility: ShaderStage::COMPUTE,
-					ty: BindingType::StorageTexture {
-						format: TextureFormat::Rgba32Float, // TODO: see if 16 bit floats work?
-						access: StorageTextureAccess::WriteOnly,
-						view_dimension: TextureViewDimension::D3,
-					},
-					count: None,
-				},
-
-			],
-			label: None,
-		});
 
 		// for voxelizing the scene into the texture
 		let voxelize_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -144,11 +123,6 @@ impl FromWorld for VoxelizePipeline {
 		});
 
 		// next up, make the pipelines
-		let clear_pipeline_layout = render_device.create_pipeline_layout(&PipelineLayoutDescriptor {
-			label: None,
-			push_constant_ranges: &[],
-			bind_group_layouts: &[&clear_layout],
-		});
 
 		let mipmap_pipeline_layout = render_device.create_pipeline_layout(&PipelineLayoutDescriptor {
 			label: None,
@@ -160,13 +134,6 @@ impl FromWorld for VoxelizePipeline {
 			label: None,
 			push_constant_ranges: &[],
 			bind_group_layouts: &[&voxelize_layout, &pbr_shaders.mesh_layout], // TODO: also needs the light layout + actual mesh info
-		});
-
-		let clear_pipeline = render_device.create_compute_pipeline(&ComputePipelineDescriptor {
-			label: None,
-			layout: Some(&clear_pipeline_layout),
-			module: &shader_module,
-			entry_point: "clear",
 		});
 
 		let mipmap_pipeline = render_device.create_compute_pipeline(&ComputePipelineDescriptor {
@@ -185,10 +152,8 @@ impl FromWorld for VoxelizePipeline {
 
 		VoxelizePipeline {
 			shader_module,
-			clear_pipeline,
 			voxelize_pipeline,
 			mipmap_pipeline,
-			clear_layout,
 			voxelize_layout,
 			mipmap_layout,
 			volume_texture_sampler: render_device.create_sampler(&SamplerDescriptor {
