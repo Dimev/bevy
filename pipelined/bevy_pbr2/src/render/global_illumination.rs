@@ -1,4 +1,4 @@
-use crate::{AmbientLight, DirectionalLight, MeshMeta, MeshTransform, PbrPipeline, PointLight};
+use crate::{AmbientLight, DirectionalLight, MeshMeta, MeshTransform, PbrPipeline, PointLight, GiVolume};
 use bevy_math::{Mat4, Vec3, Vec4};
 use bevy_ecs::system::lifetimeless::*;
 use bevy_ecs::{prelude::*, system::SystemState};
@@ -7,10 +7,18 @@ use bevy_render2::{
 	render_resource::*,
     renderer::{RenderContext, RenderDevice, RenderQueue},
 	shader::Shader,
+	texture::*,
+	render_phase::{
+        Draw, DrawFunctionId, DrawFunctions, PhaseItem, RenderPhase, TrackedRenderPass,
+    },
+	view::{ExtractedView, ViewMeta, ViewUniformOffset},
 };
 
-pub const MAX_NUM_LODS: u8 = 8;
+use bevy_core_pipeline::Transparent3d;
+use bevy_transform::components::GlobalTransform;
 
+/// maximum number of cascades/lods the Gi volumes can have
+pub const MAX_NUM_LODS: u8 = 8;
 
 pub struct ExtractedGiVolume {
     size: f32,
@@ -123,7 +131,6 @@ impl FromWorld for VoxelizePipeline {
 		});
 
 		// next up, make the pipelines
-
 		let mipmap_pipeline_layout = render_device.create_pipeline_layout(&PipelineLayoutDescriptor {
 			label: None,
 			push_constant_ranges: &[],
@@ -170,3 +177,78 @@ impl FromWorld for VoxelizePipeline {
 }
 
 
+
+// get the volumes from the world ecs
+pub fn extract_volumes(
+	mut commands: Commands,
+	volumes: Query<(Entity, &GiVolume, &GlobalTransform)>
+) {
+
+	// we're only allowing one volume at a time
+	if let Ok((entity, volume, transform)) = volumes.single() {
+
+		// and insert it
+		commands.insert_resource(ExtractedGiVolume {
+			num_lods: volume.num_lods.min(MAX_NUM_LODS),
+			size: volume.size,
+			resolution: volume.resolution,
+			transform: transform.compute_matrix(),
+		});
+	}
+}
+
+pub struct ViewGiVolume {
+	pub volume_texture_view: TextureView,
+}
+
+pub struct ViewGiVolumes {
+	pub volume_texture: Texture,
+	pub volume_texture_view: TextureView,
+	pub volumes: Vec<Entity>,
+	pub gpu_volume_binding_index: u32,
+}
+
+#[derive(Default)]
+pub struct GiMeta {
+	pub view_gi_volumes: DynamicUniformVec<GpuGiVolume>,
+	pub view_gi_mipmaps: DynamicUniformVec<GpuGiVolume>,
+	pub volume_view_option: Option<BindGroup>,
+}
+
+// prepares a light for each view
+// each view is basically a render from each camera
+// here we get the volume for each view, + the texture associated with the volume
+pub fn prepare_lights(
+	mut commands: Commands,
+	mut texture_cache: ResMut<TextureCache>,
+	render_device: Res<RenderDevice>,
+	render_queue: Res<RenderQueue>,
+	mut gi_meta: ResMut<GiMeta>,
+	views: Query<Entity, With<RenderPhase<Transparent3d>>>,
+	volume: Res<ExtractedGiVolume>
+) {
+
+	// PERF: view.iter().count() could be views.iter().len() if we implemented ExactSizeIterator for archetype-only filters
+    gi_meta
+        .view_gi_volumes
+        .reserve_and_clear(views.iter().count(), &render_device);
+
+	for entity in views.iter() {
+		// get the volume texture for this view
+		let volume_texture = texture_cache.get(
+			&render_device,
+			TextureDescriptor {
+				size: Extent3d { width: volume.resolution as u32, height: volume.resolution as u32, depth_or_array_layers: volume.resolution as u32 * volume.num_lods as u32 },
+				mip_level_count: volume.num_lods.next_power_of_two().trailing_zeros(), // same as log2
+				sample_count: 1,
+				dimension: TextureDimension::D3,
+				format: TextureFormat::Rgba32Float, // TODO: see if 16 bit floats work?
+				usage: TextureUsage::SAMPLED | TextureUsage::STORAGE,
+				label: None,
+			}
+		);
+		// TODO: add the other stuff to this view, idk how yet
+	}
+}
+
+// TODO: find a way to make the render pass work

@@ -1,4 +1,4 @@
-use crate::{DirectionalLight, PointLight, StandardMaterial};
+use crate::{DirectionalLight, PointLight, StandardMaterial, GiVolume};
 use bevy_asset::Handle;
 use bevy_ecs::bundle::Bundle;
 use bevy_render2::mesh::Mesh;
@@ -36,5 +36,13 @@ pub struct PointLightBundle {
 pub struct DirectionalLightBundle {
     pub directional_light: DirectionalLight,
     pub transform: Transform,
+    pub global_transform: GlobalTransform,
+}
+
+/// A component bundle for "GI Volume" entities
+#[derive(Debug, Bundle, Default)]
+pub struct GiVolumeBundle {
+	pub gi_volume: GiVolume,
+	pub transform: Transform,
     pub global_transform: GlobalTransform,
 }

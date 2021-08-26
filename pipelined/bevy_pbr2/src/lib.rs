@@ -8,6 +8,7 @@ pub use bundle::*;
 pub use light::*;
 pub use material::*;
 pub use render::*;
+pub use global_illumination::*;
 
 use bevy_app::prelude::*;
 use bevy_asset::Handle;
