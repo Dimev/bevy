@@ -200,10 +200,6 @@ pub fn extract_volumes(
 	}
 }
 
-pub struct ViewGiVolume {
-	pub volume_texture_view: TextureView,
-}
-
 pub struct ViewGiVolumes {
 	pub volume_texture: Texture,
 	pub volume_texture_view: TextureView,
@@ -273,6 +269,8 @@ pub fn prepare_volumes(
 			view_projection: volume.transform,
 		};
 
+		// TODO: store the mipmap gen inside the view mipmpas, and for each view, also store the amount of mipmaps it needs
+		// OR do mip gen in the shader manually
 		commands.entity(entity).insert(ViewGiVolumes {
 			volume_texture: volume_texture.texture,
 			volume_texture_view,
