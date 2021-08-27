@@ -43,12 +43,14 @@ impl Plugin for PbrPlugin {
         let render_app = app.sub_app_mut(0);
         render_app
             .add_system_to_stage(RenderStage::Extract, render::extract_lights)
+			.add_system_to_stage(RenderStage::Extract, render::extract_volumes)
             .add_system_to_stage(
                 RenderStage::Prepare,
                 // this is added as an exclusive system because it contributes new views. it must run (and have Commands applied)
                 // _before_ the `prepare_views()` system is run. ideally this becomes a normal system when "stageless" features come out
                 render::prepare_lights.exclusive_system(),
             )
+			.add_system_to_stage(RenderStage::Prepare, render::prepare_volumes)
             .add_system_to_stage(RenderStage::Queue, render::queue_meshes)
             .add_system_to_stage(RenderStage::Queue, render::queue_shadows)
             .add_system_to_stage(RenderStage::Queue, render::queue_transform_bind_group)
@@ -57,7 +59,8 @@ impl Plugin for PbrPlugin {
             .init_resource::<ShadowPipeline>()
             .init_resource::<DrawFunctions<Shadow>>()
             .init_resource::<MeshMeta>()
-            .init_resource::<LightMeta>();
+            .init_resource::<LightMeta>()
+			.init_resource::<GiMeta>();
 
         let draw_shadow_mesh = DrawShadowMesh::new(&mut render_app.world);
         let shadow_pass_node = ShadowPassNode::new(&mut render_app.world);

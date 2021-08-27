@@ -2,6 +2,7 @@ mod global_illumination;
 mod light;
 
 pub use light::*;
+pub use global_illumination::*;
 
 use crate::{StandardMaterial, StandardMaterialUniformData};
 use bevy_asset::Handle;

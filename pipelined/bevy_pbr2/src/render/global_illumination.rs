@@ -20,6 +20,9 @@ use bevy_transform::components::GlobalTransform;
 /// maximum number of cascades/lods the Gi volumes can have
 pub const MAX_NUM_LODS: u8 = 8;
 
+/// the format to use for the volume texture
+pub const VOLUME_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba32Float; // TODO: see if 16 bit floats work?
+
 pub struct ExtractedGiVolume {
     size: f32,
     num_lods: u8,
@@ -89,7 +92,7 @@ impl FromWorld for VoxelizePipeline {
 					binding: 1,
 					visibility: ShaderStage::COMPUTE,
 					ty: BindingType::StorageTexture {
-						format: TextureFormat::Rgba32Float, // TODO: see if 16 bit floats work?
+						format: VOLUME_TEXTURE_FORMAT,
 						access: StorageTextureAccess::ReadWrite,
 						view_dimension: TextureViewDimension::D3,
 					},
@@ -185,7 +188,7 @@ pub fn extract_volumes(
 ) {
 
 	// we're only allowing one volume at a time
-	if let Ok((entity, volume, transform)) = volumes.single() {
+	if let Ok((_, volume, transform)) = volumes.single() {
 
 		// and insert it
 		commands.insert_resource(ExtractedGiVolume {
@@ -204,21 +207,21 @@ pub struct ViewGiVolume {
 pub struct ViewGiVolumes {
 	pub volume_texture: Texture,
 	pub volume_texture_view: TextureView,
-	pub volumes: Vec<Entity>,
+	pub volumes: Vec<Entity>, // stores all the render passes: TODO: NEEDED? 
 	pub gpu_volume_binding_index: u32,
 }
 
 #[derive(Default)]
 pub struct GiMeta {
 	pub view_gi_volumes: DynamicUniformVec<GpuGiVolume>,
-	pub view_gi_mipmaps: DynamicUniformVec<GpuGiVolume>,
+	pub view_gi_mipmaps: DynamicUniformVec<GpuMipMap>,
 	pub volume_view_option: Option<BindGroup>,
 }
 
-// prepares a light for each view
+// prepares a volume for each view
 // each view is basically a render from each camera
 // here we get the volume for each view, + the texture associated with the volume
-pub fn prepare_lights(
+pub fn prepare_volumes(
 	mut commands: Commands,
 	mut texture_cache: ResMut<TextureCache>,
 	render_device: Res<RenderDevice>,
@@ -233,22 +236,53 @@ pub fn prepare_lights(
         .view_gi_volumes
         .reserve_and_clear(views.iter().count(), &render_device);
 
+	//gi_meta
+	//	.view_gi_mipmaps
+    //  .reserve_and_clear(views.iter().count(), &render_device);
+
 	for entity in views.iter() {
 		// get the volume texture for this view
 		let volume_texture = texture_cache.get(
 			&render_device,
 			TextureDescriptor {
 				size: Extent3d { width: volume.resolution as u32, height: volume.resolution as u32, depth_or_array_layers: volume.resolution as u32 * volume.num_lods as u32 },
-				mip_level_count: volume.num_lods.next_power_of_two().trailing_zeros(), // same as log2
+				mip_level_count: volume.num_lods.next_power_of_two().trailing_zeros() + 1, // same as log2
 				sample_count: 1,
 				dimension: TextureDimension::D3,
-				format: TextureFormat::Rgba32Float, // TODO: see if 16 bit floats work?
+				format: VOLUME_TEXTURE_FORMAT,
 				usage: TextureUsage::SAMPLED | TextureUsage::STORAGE,
 				label: None,
 			}
 		);
+
+		let volume_texture_view = volume_texture.texture.create_view(&TextureViewDescriptor {
+			label: None,
+			format: None,
+			dimension: Some(TextureViewDimension::D3),
+			aspect: TextureAspect::All,
+			base_mip_level: 0,
+			mip_level_count: None,
+			base_array_layer: 0,
+			array_layer_count: None,
+		});
+
+		let gpu_volume = GpuGiVolume {
+			size: volume.size,
+			num_lods: volume.num_lods as u32,
+			resolution: volume.resolution as u32,
+			view_projection: volume.transform,
+		};
+
+		commands.entity(entity).insert(ViewGiVolumes {
+			volume_texture: volume_texture.texture,
+			volume_texture_view,
+			volumes: vec![],
+			gpu_volume_binding_index: gi_meta.view_gi_volumes.push(gpu_volume)
+		});
 		// TODO: add the other stuff to this view, idk how yet
 	}
+
+	gi_meta.view_gi_volumes.write_buffer(&render_queue);
 }
 
 // TODO: find a way to make the render pass work

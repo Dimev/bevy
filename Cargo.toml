@@ -161,6 +161,10 @@ name = "3d_scene_pipelined"
 path = "examples/3d/3d_scene_pipelined.rs"
 
 [[example]]
+name = "3d_scene_gi"
+path = "examples/3d/3d_scene_gi.rs"
+
+[[example]]
 name = "many_cubes_pipelined"
 path = "examples/3d/many_cubes_pipelined.rs"
 
