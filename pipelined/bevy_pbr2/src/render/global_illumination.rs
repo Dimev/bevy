@@ -7,6 +7,7 @@ use bevy_render2::{
 	render_resource::*,
     renderer::{RenderContext, RenderDevice, RenderQueue},
 	shader::Shader,
+	render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
 	texture::*,
 	render_phase::{
         Draw, DrawFunctionId, DrawFunctions, PhaseItem, RenderPhase, TrackedRenderPass,
@@ -47,10 +48,10 @@ pub struct GpuMipMap {
 	level: u32,
 }
 
-pub struct VoxelizePipeline {
-	shader_module: ShaderModule,
+pub struct VoxelizeShaders {
 	voxelize_pipeline: ComputePipeline,
 	mipmap_pipeline: ComputePipeline,
+	volume_layout: BindGroupLayout,
 	voxelize_layout: BindGroupLayout,
 	mipmap_layout: BindGroupLayout,
 	volume_texture_sampler: Sampler,
@@ -61,7 +62,7 @@ pub struct VoxelizePipeline {
 // prepare step to put everything into the gpu version of the structs
 // queue step to write everything to the gpu buffers
 // and a node that runs the compute shader (IS THIS REALLY NEEDED? CAN THIS BE DONE IN QUEUE?)
-impl FromWorld for VoxelizePipeline {
+impl FromWorld for VoxelizeShaders {
 
 	fn from_world(world: &mut World) -> Self {
 		let render_device = world.get_resource::<RenderDevice>().unwrap();
@@ -72,6 +73,25 @@ impl FromWorld for VoxelizePipeline {
 			.unwrap();
 
 		let shader_module = render_device.create_shader_module(&shader);
+
+		// volume layout, for storing the volume texture
+		let volume_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+			entries: &[
+				// we also want our volume texture to write to
+				BindGroupLayoutEntry {
+					binding: 0,
+					visibility: ShaderStage::COMPUTE,
+					ty: BindingType::StorageTexture {
+						format: VOLUME_TEXTURE_FORMAT,
+						access: StorageTextureAccess::ReadWrite,
+						view_dimension: TextureViewDimension::D3,
+					},
+					count: None,
+				},
+
+			],
+			label: None,
+		});
 
 		// for voxelizing the scene into the texture
 		let voxelize_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -86,17 +106,6 @@ impl FromWorld for VoxelizePipeline {
 						min_binding_size: BufferSize::new(GpuGiVolume::std140_size_static() as u64),
 					},
 					count: None, 
-				},
-				// and we also want our volume texture to write to
-				BindGroupLayoutEntry {
-					binding: 1,
-					visibility: ShaderStage::COMPUTE,
-					ty: BindingType::StorageTexture {
-						format: VOLUME_TEXTURE_FORMAT,
-						access: StorageTextureAccess::ReadWrite,
-						view_dimension: TextureViewDimension::D3,
-					},
-					count: None,
 				},
 
 			],
@@ -117,17 +126,6 @@ impl FromWorld for VoxelizePipeline {
 					},
 					count: None, 
 				},
-				// and we also want our volume texture to write to
-				BindGroupLayoutEntry {
-					binding: 1,
-					visibility: ShaderStage::COMPUTE,
-					ty: BindingType::StorageTexture {
-						format: TextureFormat::Rgba32Float, // TODO: see if 16 bit floats work?
-						access: StorageTextureAccess::ReadWrite,
-						view_dimension: TextureViewDimension::D3,
-					},
-					count: None,
-				},
 
 			],
 			label: None,
@@ -137,13 +135,13 @@ impl FromWorld for VoxelizePipeline {
 		let mipmap_pipeline_layout = render_device.create_pipeline_layout(&PipelineLayoutDescriptor {
 			label: None,
 			push_constant_ranges: &[],
-			bind_group_layouts: &[&mipmap_layout],
+			bind_group_layouts: &[&volume_layout, &mipmap_layout],
 		});
 
 		let voxelize_pipeline_layout = render_device.create_pipeline_layout(&PipelineLayoutDescriptor {
 			label: None,
 			push_constant_ranges: &[],
-			bind_group_layouts: &[&voxelize_layout, &pbr_shaders.mesh_layout], // TODO: also needs the light layout + actual mesh info
+			bind_group_layouts: &[&volume_layout, &voxelize_layout, &pbr_shaders.mesh_layout], // TODO: also needs the light layout + actual mesh info
 		});
 
 		let mipmap_pipeline = render_device.create_compute_pipeline(&ComputePipelineDescriptor {
@@ -160,8 +158,8 @@ impl FromWorld for VoxelizePipeline {
 			entry_point: "voxelize",
 		});
 
-		VoxelizePipeline {
-			shader_module,
+		VoxelizeShaders {
+			volume_layout,
 			voxelize_pipeline,
 			mipmap_pipeline,
 			voxelize_layout,
@@ -211,7 +209,8 @@ pub struct ViewGiVolumes {
 pub struct GiMeta {
 	pub view_gi_volumes: DynamicUniformVec<GpuGiVolume>,
 	pub view_gi_mipmaps: DynamicUniformVec<GpuMipMap>,
-	pub volume_view_option: Option<BindGroup>,
+	pub num_mipmaps: u32,
+	pub volume_view: Option<BindGroup>,
 }
 
 // prepares a volume for each view
@@ -232,9 +231,11 @@ pub fn prepare_volumes(
         .view_gi_volumes
         .reserve_and_clear(views.iter().count(), &render_device);
 
-	//gi_meta
-	//	.view_gi_mipmaps
-    //  .reserve_and_clear(views.iter().count(), &render_device);
+	gi_meta
+		.view_gi_mipmaps
+    	.reserve_and_clear(views.iter().count() * volume.num_lods as usize, &render_device);
+
+	gi_meta.num_mipmaps = volume.num_lods as u32;
 
 	for entity in views.iter() {
 		// get the volume texture for this view
@@ -284,3 +285,65 @@ pub fn prepare_volumes(
 }
 
 // TODO: find a way to make the render pass work
+
+// node that runs the voxelization pass
+pub struct VoxelizePassNode {
+	main_query: QueryState<&'static ViewGiVolumes>,
+}
+
+impl VoxelizePassNode {
+	pub const IN_VIEW: &'static str = "view";
+
+	pub fn new(world: &mut World) -> Self {
+		Self { main_query: QueryState::new(world) }
+	}
+}
+
+impl Node for VoxelizePassNode {
+	fn input(&self) -> Vec<SlotInfo> {
+		vec![SlotInfo::new(VoxelizePassNode::IN_VIEW, SlotType::Entity)]
+	}
+
+	fn update(&mut self, world: &mut World) {
+		self.main_query.update_archetypes(world);
+	}
+
+	fn run(&self, graph: &mut RenderGraphContext, render_context: &mut RenderContext, world: &World) -> Result<(), NodeRunError> {
+		let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
+		let shaders = world.get_resource::<VoxelizeShaders>().unwrap();
+		if let Ok(view_volume) = self.main_query.get_manual(world, view_entity) {
+
+			// there's only one volume, so only one thing to do
+			// step 1: clear the texture
+			// TODO: wait for 10.0
+			// render_context.command_encoder.clear_texture(&view_volume.volume_texture, ImageSubresourceRange)
+
+			// next up, we want to voxelize all meshes, so start a new pipeline to do that
+			let mut compute_pass = render_context.command_encoder.begin_compute_pass(&ComputePassDescriptor {
+				label: None,
+			});
+
+			// we want to voxelize things
+			compute_pass.set_pipeline(&shaders.voxelize_pipeline);
+
+			// set the volume texture as our output
+			// compute_pass.set_bind_group(0, bind_group: &'a BindGroup, offsets: &[DynamicOffset])
+
+			// TODO: figure out where we need to create the bind group for the volume texture
+
+			// go over all meshes
+			// TODO
+			// and run the shader!
+			compute_pass.dispatch(16, 16, 16);
+
+			// next up, we want to make mipmaps
+
+			// and drop it because we 
+
+
+
+		}
+
+		Ok(())
+	}
+}
