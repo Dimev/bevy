@@ -64,6 +64,7 @@ impl Plugin for PbrPlugin {
 
         let draw_shadow_mesh = DrawShadowMesh::new(&mut render_app.world);
         let shadow_pass_node = ShadowPassNode::new(&mut render_app.world);
+		let voxelize_pass_node = VoxelizePassNode::new(&mut render_app.world);
         render_app.add_draw_command::<Transparent3d, DrawPbr, DrawPbr>();
         let render_world = render_app.world.cell();
         let draw_functions = render_world

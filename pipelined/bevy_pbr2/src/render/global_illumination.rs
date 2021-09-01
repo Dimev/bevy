@@ -198,19 +198,19 @@ pub fn extract_volumes(
 	}
 }
 
-pub struct ViewGiVolumes {
-	pub volume_texture: Texture,
-	pub volume_texture_view: TextureView,
-	pub volumes: Vec<Entity>, // stores all the render passes: TODO: NEEDED? 
-	pub gpu_volume_binding_index: u32,
-}
+//pub struct ViewGiVolumes {
+//	pub volume_texture: Texture,
+//	pub volume_texture_view: TextureView,
+//	pub volumes: Vec<Entity>, // stores all the render passes: TODO: NEEDED? 
+//	pub gpu_volume_binding_index: u32,
+//}
 
 #[derive(Default)]
 pub struct GiMeta {
-	pub view_gi_volumes: DynamicUniformVec<GpuGiVolume>,
-	pub view_gi_mipmaps: DynamicUniformVec<GpuMipMap>,
-	pub num_mipmaps: u32,
-	pub volume_view: Option<BindGroup>,
+	pub gi_texture_bind: Option<BindGroup>,
+	pub gi_volume_bind: Option<BindGroup>,
+	pub gi_volume_buffer: Option<Buffer>,
+	pub gi_mipmaps_bind: Vec<BindGroup>,
 }
 
 // prepares a volume for each view
@@ -222,73 +222,92 @@ pub fn prepare_volumes(
 	render_device: Res<RenderDevice>,
 	render_queue: Res<RenderQueue>,
 	mut gi_meta: ResMut<GiMeta>,
-	views: Query<Entity, With<RenderPhase<Transparent3d>>>,
-	volume: Res<ExtractedGiVolume>
+	volume: Res<ExtractedGiVolume>,
+	shaders: Res<VoxelizeShaders>
 ) {
 
-	// PERF: view.iter().count() could be views.iter().len() if we implemented ExactSizeIterator for archetype-only filters
-    gi_meta
-        .view_gi_volumes
-        .reserve_and_clear(views.iter().count(), &render_device);
-
-	gi_meta
-		.view_gi_mipmaps
-    	.reserve_and_clear(views.iter().count() * volume.num_lods as usize, &render_device);
-
-	gi_meta.num_mipmaps = volume.num_lods as u32;
-
-	for entity in views.iter() {
-		// get the volume texture for this view
-		let volume_texture = texture_cache.get(
-			&render_device,
-			TextureDescriptor {
-				size: Extent3d { width: volume.resolution as u32, height: volume.resolution as u32, depth_or_array_layers: volume.resolution as u32 * volume.num_lods as u32 },
-				mip_level_count: volume.num_lods.next_power_of_two().trailing_zeros() + 1, // same as log2
-				sample_count: 1,
-				dimension: TextureDimension::D3,
-				format: VOLUME_TEXTURE_FORMAT,
-				usage: TextureUsage::SAMPLED | TextureUsage::STORAGE,
-				label: None,
-			}
-		);
-
-		let volume_texture_view = volume_texture.texture.create_view(&TextureViewDescriptor {
+	// get the volume texture for this view
+	let volume_texture = texture_cache.get(
+		&render_device,
+		TextureDescriptor {
+			size: Extent3d { width: volume.resolution as u32, height: volume.resolution as u32, depth_or_array_layers: volume.resolution as u32 * volume.num_lods as u32 },
+			mip_level_count: volume.num_lods.next_power_of_two().trailing_zeros() + 1, // same as log2
+			sample_count: 1,
+			dimension: TextureDimension::D3,
+			format: VOLUME_TEXTURE_FORMAT,
+			usage: TextureUsage::SAMPLED | TextureUsage::STORAGE,
 			label: None,
-			format: None,
-			dimension: Some(TextureViewDimension::D3),
-			aspect: TextureAspect::All,
-			base_mip_level: 0,
-			mip_level_count: None,
-			base_array_layer: 0,
-			array_layer_count: None,
-		});
+		}
+	);
 
-		let gpu_volume = GpuGiVolume {
-			size: volume.size,
-			num_lods: volume.num_lods as u32,
-			resolution: volume.resolution as u32,
-			view_projection: volume.transform,
-		};
+	let volume_texture_view = volume_texture.texture.create_view(&TextureViewDescriptor {
+		label: None,
+		format: None,
+		dimension: Some(TextureViewDimension::D3),
+		aspect: TextureAspect::All,
+		base_mip_level: 0,
+		mip_level_count: None,
+		base_array_layer: 0,
+		array_layer_count: None,
+	});
 
-		// TODO: store the mipmap gen inside the view mipmpas, and for each view, also store the amount of mipmaps it needs
-		// OR do mip gen in the shader manually
-		commands.entity(entity).insert(ViewGiVolumes {
-			volume_texture: volume_texture.texture,
-			volume_texture_view,
-			volumes: vec![],
-			gpu_volume_binding_index: gi_meta.view_gi_volumes.push(gpu_volume)
-		});
-		// TODO: add the other stuff to this view, idk how yet
-	}
+	// set the volume texture bind group
+	gi_meta.gi_texture_bind = Some(render_device.create_bind_group(&BindGroupDescriptor {
+		label: Some("volume texture"),
+		layout: &shaders.volume_layout,
+		entries: &[BindGroupEntry {
+			binding: 0,
+			resource: BindingResource::TextureView(&volume_texture_view)
+		}],
+	}));
 
-	gi_meta.view_gi_volumes.write_buffer(&render_queue);
+	let gpu_volume = GpuGiVolume {
+		size: volume.size,
+		num_lods: volume.num_lods as u32,
+		resolution: volume.resolution as u32,
+		view_projection: volume.transform,
+	};
+
+	// TODO: only write if volume changed
+	let gpu_volume_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
+		label: None,
+		contents: gpu_volume.as_std140(),
+		usage: BufferUsage::UNIFORM,
+	});
+
+	gi_meta.gi_volume_buffer = Some(gpu_volume_buffer);
+
+	// and set the gpu volume as a bind group
+	gi_meta.gi_volume_bind = Some(render_device.create_bind_group(&BindGroupDescriptor {
+		label: None,
+		layout: &shaders.voxelize_layout,
+		entries: &[BindGroupEntry {
+			binding: 0,
+			resource: BindingResource::Buffer(BufferBinding {
+				buffer: gpu_volume_buffer,
+				offset: 0,
+				size: None,
+			})
+		}],
+	}));
+
+	// TODO: store the mipmap gen inside the view mipmpas, and for each view, also store the amount of mipmaps it needs
+	// OR do mip gen in the shader manually
+	//commands.entity(entity).insert(ViewGiVolumes {
+	//	volume_texture: volume_texture.texture,
+	//	volume_texture_view,
+	//	volumes: vec![],
+	//	gpu_volume_binding_index: gi_meta.view_gi_volumes.push(gpu_volume)
+	//});
+	// TODO: add the other stuff to this view, idk how yet
+
 }
 
 // TODO: find a way to make the render pass work
 
 // node that runs the voxelization pass
 pub struct VoxelizePassNode {
-	main_query: QueryState<&'static ViewGiVolumes>,
+	main_query: QueryState<&'static GiMeta>,
 }
 
 impl VoxelizePassNode {
@@ -311,38 +330,39 @@ impl Node for VoxelizePassNode {
 	fn run(&self, graph: &mut RenderGraphContext, render_context: &mut RenderContext, world: &World) -> Result<(), NodeRunError> {
 		let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
 		let shaders = world.get_resource::<VoxelizeShaders>().unwrap();
-		if let Ok(view_volume) = self.main_query.get_manual(world, view_entity) {
+		let meta = world.get_resource::<GiMeta>().unwrap();
 
-			// there's only one volume, so only one thing to do
-			// step 1: clear the texture
-			// TODO: wait for 10.0
-			// render_context.command_encoder.clear_texture(&view_volume.volume_texture, ImageSubresourceRange)
+		// there's only one volume, so only one thing to do
+		// step 1: clear the texture
+		// TODO: wait for 10.0
+		// render_context.command_encoder.clear_texture(&view_volume.volume_texture, ImageSubresourceRange)
 
-			// next up, we want to voxelize all meshes, so start a new pipeline to do that
-			let mut compute_pass = render_context.command_encoder.begin_compute_pass(&ComputePassDescriptor {
-				label: None,
-			});
+		// next up, we want to voxelize all meshes, so start a new pipeline to do that
+		let mut compute_pass = render_context.command_encoder.begin_compute_pass(&ComputePassDescriptor {
+			label: None,
+		});
 
-			// we want to voxelize things
-			compute_pass.set_pipeline(&shaders.voxelize_pipeline);
+		// we want to voxelize things
+		compute_pass.set_pipeline(&shaders.voxelize_pipeline);
 
-			// set the volume texture as our output
-			// compute_pass.set_bind_group(0, bind_group: &'a BindGroup, offsets: &[DynamicOffset])
+		// set the volume texture as our output
+		compute_pass.set_bind_group(0, meta.gi_texture_bind.unwrap(), &[]);
 
-			// TODO: figure out where we need to create the bind group for the volume texture
+		// TODO: figure out where we need to create the bind group for the volume texture
 
-			// go over all meshes
-			// TODO
-			// and run the shader!
-			compute_pass.dispatch(16, 16, 16);
+		// go over all meshes
+		// TODO
+		// and run the shader!
+		compute_pass.dispatch(16, 16, 16);
 
-			// next up, we want to make mipmaps
+		// next up, we want to make mipmaps
 
-			// and drop it because we 
+		// and drop it because we are done
+		drop(compute_pass);
 
 
 
-		}
+		
 
 		Ok(())
 	}
