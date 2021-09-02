@@ -1,4 +1,5 @@
 use crate::{AmbientLight, DirectionalLight, MeshMeta, MeshTransform, PbrPipeline, PointLight, GiVolume};
+use bevy_core::bytes_of;
 use bevy_math::{Mat4, Vec3, Vec4};
 use bevy_ecs::system::lifetimeless::*;
 use bevy_ecs::{prelude::*, system::SystemState};
@@ -48,7 +49,7 @@ pub struct GpuMipMap {
 	level: u32,
 }
 
-pub struct VoxelizeShaders {
+pub struct VoxelizePipeline {
 	voxelize_pipeline: ComputePipeline,
 	mipmap_pipeline: ComputePipeline,
 	volume_layout: BindGroupLayout,
@@ -62,11 +63,11 @@ pub struct VoxelizeShaders {
 // prepare step to put everything into the gpu version of the structs
 // queue step to write everything to the gpu buffers
 // and a node that runs the compute shader (IS THIS REALLY NEEDED? CAN THIS BE DONE IN QUEUE?)
-impl FromWorld for VoxelizeShaders {
+impl FromWorld for VoxelizePipeline {
 
 	fn from_world(world: &mut World) -> Self {
 		let render_device = world.get_resource::<RenderDevice>().unwrap();
-		let pbr_shaders = world.get_resource::<PbrPipeline>().unwrap();
+		//let pbr_shaders = world.get_resource::<PbrPipeline>().unwrap();
 
 		let shader = Shader::from_wgsl(include_str!("gi.wgsl"))
 			.process(&[])
@@ -83,7 +84,7 @@ impl FromWorld for VoxelizeShaders {
 					visibility: ShaderStage::COMPUTE,
 					ty: BindingType::StorageTexture {
 						format: VOLUME_TEXTURE_FORMAT,
-						access: StorageTextureAccess::ReadWrite,
+						access: StorageTextureAccess::WriteOnly,
 						view_dimension: TextureViewDimension::D3,
 					},
 					count: None,
@@ -135,13 +136,13 @@ impl FromWorld for VoxelizeShaders {
 		let mipmap_pipeline_layout = render_device.create_pipeline_layout(&PipelineLayoutDescriptor {
 			label: None,
 			push_constant_ranges: &[],
-			bind_group_layouts: &[&volume_layout, &mipmap_layout],
+			bind_group_layouts: &[&volume_layout, /*&mipmap_layout*/],
 		});
 
 		let voxelize_pipeline_layout = render_device.create_pipeline_layout(&PipelineLayoutDescriptor {
 			label: None,
 			push_constant_ranges: &[],
-			bind_group_layouts: &[&volume_layout, &voxelize_layout, &pbr_shaders.mesh_layout], // TODO: also needs the light layout + actual mesh info
+			bind_group_layouts: &[&volume_layout, /*&voxelize_layout, &pbr_shaders.mesh_layout*/], // TODO: also needs the light layout + actual mesh info
 		});
 
 		let mipmap_pipeline = render_device.create_compute_pipeline(&ComputePipelineDescriptor {
@@ -158,7 +159,7 @@ impl FromWorld for VoxelizeShaders {
 			entry_point: "voxelize",
 		});
 
-		VoxelizeShaders {
+		VoxelizePipeline {
 			volume_layout,
 			voxelize_pipeline,
 			mipmap_pipeline,
@@ -198,19 +199,19 @@ pub fn extract_volumes(
 	}
 }
 
-//pub struct ViewGiVolumes {
-//	pub volume_texture: Texture,
-//	pub volume_texture_view: TextureView,
-//	pub volumes: Vec<Entity>, // stores all the render passes: TODO: NEEDED? 
-//	pub gpu_volume_binding_index: u32,
-//}
+pub struct ViewGiVolume {
+	pub volume_texture: Texture,
+	pub volume_texture_view: TextureView,
+	pub volume_texture_bind: BindGroup,
+	pub gpu_binding_index: u32,
+	// TODO: store offsets for the mipmap gen
+}
 
+// TODO: move this to have per-view textures, per view mipmaps too
 #[derive(Default)]
 pub struct GiMeta {
-	pub gi_texture_bind: Option<BindGroup>,
-	pub gi_volume_bind: Option<BindGroup>,
-	pub gi_volume_buffer: Option<Buffer>,
-	pub gi_mipmaps_bind: Vec<BindGroup>,
+	pub view_gi_volumes: DynamicUniformVec<GpuGiVolume>,
+	pub gi_mipmaps: DynamicUniformVec<GpuGiVolume>,
 }
 
 // prepares a volume for each view
@@ -222,74 +223,68 @@ pub fn prepare_volumes(
 	render_device: Res<RenderDevice>,
 	render_queue: Res<RenderQueue>,
 	mut gi_meta: ResMut<GiMeta>,
+	views: Query<Entity, With<RenderPhase<Transparent3d>>>,
 	volume: Res<ExtractedGiVolume>,
-	shaders: Res<VoxelizeShaders>
+	shaders: Res<VoxelizePipeline>
 ) {
 
-	// get the volume texture for this view
-	let volume_texture = texture_cache.get(
-		&render_device,
-		TextureDescriptor {
-			size: Extent3d { width: volume.resolution as u32, height: volume.resolution as u32, depth_or_array_layers: volume.resolution as u32 * volume.num_lods as u32 },
-			mip_level_count: volume.num_lods.next_power_of_two().trailing_zeros() + 1, // same as log2
-			sample_count: 1,
-			dimension: TextureDimension::D3,
-			format: VOLUME_TEXTURE_FORMAT,
-			usage: TextureUsage::SAMPLED | TextureUsage::STORAGE,
+	// reserve the needed stuff
+	gi_meta.view_gi_volumes.reserve_and_clear(views.iter().count(), &render_device);
+
+	// go over all views
+	for entity in views.iter() {
+
+		// get the volume texture for this view
+		let volume_texture = texture_cache.get(
+			&render_device,
+			TextureDescriptor {
+				size: Extent3d { width: volume.resolution as u32, height: volume.resolution as u32, depth_or_array_layers: volume.resolution as u32 * volume.num_lods as u32 },
+				mip_level_count: volume.num_lods.next_power_of_two().trailing_zeros() + 1, // same as log2
+				sample_count: 1,
+				dimension: TextureDimension::D3,
+				format: VOLUME_TEXTURE_FORMAT,
+				usage: TextureUsage::SAMPLED | TextureUsage::STORAGE,
+				label: None,
+			}
+		);
+
+		let volume_texture_view = volume_texture.texture.create_view(&TextureViewDescriptor {
 			label: None,
-		}
-	);
+			format: None,
+			dimension: Some(TextureViewDimension::D3),
+			aspect: TextureAspect::All,
+			base_mip_level: 0,
+			mip_level_count: None,
+			base_array_layer: 0,
+			array_layer_count: None,
+		});
 
-	let volume_texture_view = volume_texture.texture.create_view(&TextureViewDescriptor {
-		label: None,
-		format: None,
-		dimension: Some(TextureViewDimension::D3),
-		aspect: TextureAspect::All,
-		base_mip_level: 0,
-		mip_level_count: None,
-		base_array_layer: 0,
-		array_layer_count: None,
-	});
+		// set the volume texture bind group
+		let volume_texture_bind = Some(render_device.create_bind_group(&BindGroupDescriptor {
+			label: Some("volume texture"),
+			layout: &shaders.volume_layout,
+			entries: &[BindGroupEntry {
+				binding: 0,
+				resource: BindingResource::TextureView(&volume_texture_view)
+			}],
+		}));
 
-	// set the volume texture bind group
-	gi_meta.gi_texture_bind = Some(render_device.create_bind_group(&BindGroupDescriptor {
-		label: Some("volume texture"),
-		layout: &shaders.volume_layout,
-		entries: &[BindGroupEntry {
-			binding: 0,
-			resource: BindingResource::TextureView(&volume_texture_view)
-		}],
-	}));
+		// get the volume settings
+		let gpu_volume = GpuGiVolume {
+			size: volume.size,
+			num_lods: volume.num_lods as u32,
+			resolution: volume.resolution as u32,
+			view_projection: volume.transform,
+		};
 
-	let gpu_volume = GpuGiVolume {
-		size: volume.size,
-		num_lods: volume.num_lods as u32,
-		resolution: volume.resolution as u32,
-		view_projection: volume.transform,
-	};
-
-	// TODO: only write if volume changed
-	let gpu_volume_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
-		label: None,
-		contents: gpu_volume.as_std140(),
-		usage: BufferUsage::UNIFORM,
-	});
-
-	gi_meta.gi_volume_buffer = Some(gpu_volume_buffer);
-
-	// and set the gpu volume as a bind group
-	gi_meta.gi_volume_bind = Some(render_device.create_bind_group(&BindGroupDescriptor {
-		label: None,
-		layout: &shaders.voxelize_layout,
-		entries: &[BindGroupEntry {
-			binding: 0,
-			resource: BindingResource::Buffer(BufferBinding {
-				buffer: gpu_volume_buffer,
-				offset: 0,
-				size: None,
-			})
-		}],
-	}));
+		// next up, add the gpu volume to the view
+		commands.entity(entity).insert(ViewGiVolume {
+			volume_texture: volume_texture.texture,
+			volume_texture_view,
+			volume_texture_bind: volume_texture_bind.unwrap(),
+			gpu_binding_index: gi_meta.view_gi_volumes.push(gpu_volume),
+		});
+	}
 
 	// TODO: store the mipmap gen inside the view mipmpas, and for each view, also store the amount of mipmaps it needs
 	// OR do mip gen in the shader manually
@@ -320,7 +315,7 @@ impl VoxelizePassNode {
 
 impl Node for VoxelizePassNode {
 	fn input(&self) -> Vec<SlotInfo> {
-		vec![SlotInfo::new(VoxelizePassNode::IN_VIEW, SlotType::Entity)]
+		vec![/*SlotInfo::new(VoxelizePassNode::IN_VIEW, SlotType::Entity)*/]
 	}
 
 	fn update(&mut self, world: &mut World) {
@@ -328,9 +323,11 @@ impl Node for VoxelizePassNode {
 	}
 
 	fn run(&self, graph: &mut RenderGraphContext, render_context: &mut RenderContext, world: &World) -> Result<(), NodeRunError> {
-		let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
-		let shaders = world.get_resource::<VoxelizeShaders>().unwrap();
+		//let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
+		let shaders = world.get_resource::<VoxelizePipeline>().unwrap();
 		let meta = world.get_resource::<GiMeta>().unwrap();
+
+		println!("pronto node");
 
 		// there's only one volume, so only one thing to do
 		// step 1: clear the texture
@@ -346,7 +343,7 @@ impl Node for VoxelizePassNode {
 		compute_pass.set_pipeline(&shaders.voxelize_pipeline);
 
 		// set the volume texture as our output
-		compute_pass.set_bind_group(0, meta.gi_texture_bind.unwrap(), &[]);
+		//compute_pass.set_bind_group(0, &meta.gi_texture_bind.unwrap(), &[]);
 
 		// TODO: figure out where we need to create the bind group for the volume texture
 

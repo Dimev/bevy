@@ -25,6 +25,7 @@ use bevy_render2::{
 pub mod draw_3d_graph {
     pub mod node {
         pub const SHADOW_PASS: &str = "shadow_pass";
+        pub const VOXELIZE_PASS: &str = "voxelize_pass";
     }
 }
 
@@ -57,6 +58,7 @@ impl Plugin for PbrPlugin {
             .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Shadow>)
             .init_resource::<PbrPipeline>()
             .init_resource::<ShadowPipeline>()
+			.init_resource::<VoxelizePipeline>()
             .init_resource::<DrawFunctions<Shadow>>()
             .init_resource::<MeshMeta>()
             .init_resource::<LightMeta>()
@@ -76,6 +78,7 @@ impl Plugin for PbrPlugin {
             .get_sub_graph_mut(bevy_core_pipeline::draw_3d_graph::NAME)
             .unwrap();
         draw_3d_graph.add_node(draw_3d_graph::node::SHADOW_PASS, shadow_pass_node);
+		draw_3d_graph.add_node(draw_3d_graph::node::VOXELIZE_PASS, voxelize_pass_node);
         draw_3d_graph
             .add_node_edge(
                 draw_3d_graph::node::SHADOW_PASS,
