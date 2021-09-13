@@ -203,6 +203,8 @@ pub struct ViewGiVolume {
 	pub volume_texture: Texture,
 	pub volume_texture_view: TextureView,
 	pub volume_texture_bind: BindGroup,
+	//pub volume_buffer: Buffer,
+	//pub volume_buffer_bind: BindGroup,
 	pub gpu_binding_index: u32,
 	// TODO: store offsets for the mipmap gen
 }
