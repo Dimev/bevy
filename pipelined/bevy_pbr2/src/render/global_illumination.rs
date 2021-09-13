@@ -239,12 +239,12 @@ pub fn prepare_volumes(
 			&render_device,
 			TextureDescriptor {
 				size: Extent3d { width: volume.resolution as u32, height: volume.resolution as u32, depth_or_array_layers: volume.resolution as u32 * volume.num_lods as u32 },
-				mip_level_count: volume.num_lods.next_power_of_two().trailing_zeros() + 1, // same as log2
+				mip_level_count: volume.resolution.next_power_of_two().trailing_zeros() + 1, // same as log2
 				sample_count: 1,
 				dimension: TextureDimension::D3,
 				format: VOLUME_TEXTURE_FORMAT,
 				usage: TextureUsage::SAMPLED | TextureUsage::STORAGE,
-				label: None,
+				label: Some("Actual volume texture"),
 			}
 		);
 
@@ -261,7 +261,7 @@ pub fn prepare_volumes(
 
 		// set the volume texture bind group
 		let volume_texture_bind = Some(render_device.create_bind_group(&BindGroupDescriptor {
-			label: Some("volume texture"),
+			label: Some("volume texture bind"),
 			layout: &shaders.volume_layout,
 			entries: &[BindGroupEntry {
 				binding: 0,
@@ -302,7 +302,7 @@ pub fn prepare_volumes(
 
 // node that runs the voxelization pass
 pub struct VoxelizePassNode {
-	main_query: QueryState<&'static GiMeta>,
+	main_query: QueryState<&'static ViewGiVolume>,
 }
 
 impl VoxelizePassNode {
@@ -315,7 +315,7 @@ impl VoxelizePassNode {
 
 impl Node for VoxelizePassNode {
 	fn input(&self) -> Vec<SlotInfo> {
-		vec![/*SlotInfo::new(VoxelizePassNode::IN_VIEW, SlotType::Entity)*/]
+		vec![SlotInfo::new(VoxelizePassNode::IN_VIEW, SlotType::Entity)]
 	}
 
 	fn update(&mut self, world: &mut World) {
@@ -323,44 +323,53 @@ impl Node for VoxelizePassNode {
 	}
 
 	fn run(&self, graph: &mut RenderGraphContext, render_context: &mut RenderContext, world: &World) -> Result<(), NodeRunError> {
-		//let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
+		let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
 		let shaders = world.get_resource::<VoxelizePipeline>().unwrap();
 		let meta = world.get_resource::<GiMeta>().unwrap();
 
-		println!("pronto node");
+		// go over all volumes
+		if let Ok(view_volume) = self.main_query.get_manual(world, view_entity) {
 
-		// there's only one volume, so only one thing to do
-		// step 1: clear the texture
-		// TODO: wait for 10.0
-		// render_context.command_encoder.clear_texture(&view_volume.volume_texture, ImageSubresourceRange)
+			// there's only one volume, so only one thing to do
+			// step 1: clear the texture
+			// TODO: wait for 10.0
+			// render_context.command_encoder.clear_texture(&view_volume.volume_texture, ImageSubresourceRange)
 
-		// next up, we want to voxelize all meshes, so start a new pipeline to do that
-		let mut compute_pass = render_context.command_encoder.begin_compute_pass(&ComputePassDescriptor {
-			label: None,
-		});
+			// next up, we want to voxelize all meshes, so start a new pipeline to do that
+			let mut compute_pass = render_context.command_encoder.begin_compute_pass(&ComputePassDescriptor {
+				label: None,
+			});
 
-		// we want to voxelize things
-		compute_pass.set_pipeline(&shaders.voxelize_pipeline);
+			// we want to voxelize things
+			compute_pass.set_pipeline(&shaders.voxelize_pipeline);
 
-		// set the volume texture as our output
-		//compute_pass.set_bind_group(0, &meta.gi_texture_bind.unwrap(), &[]);
+			// set the volume texture as our output
+			compute_pass.set_bind_group(0, &view_volume.volume_texture_bind.value(), &[]);
 
-		// TODO: figure out where we need to create the bind group for the volume texture
+			// set the volume settings
 
-		// go over all meshes
-		// TODO
-		// and run the shader!
-		compute_pass.dispatch(16, 16, 16);
-
-		// next up, we want to make mipmaps
-
-		// and drop it because we are done
-		drop(compute_pass);
+			// go over all meshes
+			// TODO
 
 
+			// and run the shader!
+			compute_pass.dispatch(32, 32, 32);
 
+			// next up, we want to make mipmaps
+			// so set the pipeline for that
+			compute_pass.set_pipeline(&shaders.mipmap_pipeline);
+
+			// the volume texture is already bound, so we only need to bind the mipmaps
+
+			// and run!
+			// we need to do this a few times to do all mips
+			compute_pass.dispatch(16, 16, 16);
+
+			// and drop it because we are done
+			drop(compute_pass);
+
+		}
 		
-
 		Ok(())
 	}
 }

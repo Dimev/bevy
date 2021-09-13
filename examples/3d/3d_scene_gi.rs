@@ -159,7 +159,7 @@ fn setup(
 		gi_volume: GiVolume {
 			size: 32.0,
 			resolution: 128,
-			num_lods: 1
+			num_lods: 4
 		},
 		..Default::default()
 	});
