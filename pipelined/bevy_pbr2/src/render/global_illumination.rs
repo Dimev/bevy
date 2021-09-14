@@ -278,7 +278,7 @@ pub fn prepare_volumes(
 
 		// set the volume texture bind group
 		let volume_buffer_bind = Some(render_device.create_bind_group(&BindGroupDescriptor {
-			label: Some("volume texture bind"),
+			label: None,
 			layout: &shaders.volume_layout,
 			entries: &[BindGroupEntry {
 				binding: 0,
@@ -365,6 +365,8 @@ impl Node for VoxelizePassNode {
 
 			// and run!
 			compute_pass.dispatch(32, 1, 1);
+
+			println!("dispatched");
 
 			// we want to voxelize things
 			compute_pass.set_pipeline(&shaders.voxelize_pipeline);
