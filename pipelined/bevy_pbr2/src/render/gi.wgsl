@@ -11,7 +11,7 @@ struct Volume {
 
 // the volume buffer to write to
 [[group(0), binding(0)]]
-var<storage> volume_buffer: [[access(read_write)]]  Volume;
+var<storage> volume_buffer: [[access(read_write)]] Volume;
 
 [[stage(compute), workgroup_size(1)]]
 fn voxelize(
