@@ -19,7 +19,7 @@ pub use wgpu::util::BufferInitDescriptor;
 pub use wgpu::{
     AddressMode, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BlendComponent, BlendFactor,
-    BlendOperation, BlendState, BufferAddress, BufferBinding, BufferBindingType, BufferSize, BufferUsage,
+    BlendOperation, BlendState, BufferAddress, BufferBinding, BufferBindingType, BufferDescriptor, BufferSize, BufferUsage,
     ColorTargetState, ColorWrite, CompareFunction, ComputePassDescriptor,
     ComputePipelineDescriptor, DepthBiasState, DepthStencilState, Extent3d, Face, FilterMode,
     FragmentState, FrontFace, IndexFormat, InputStepMode, LoadOp, MultisampleState, Operations,

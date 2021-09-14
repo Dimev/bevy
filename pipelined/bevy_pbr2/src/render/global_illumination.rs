@@ -51,11 +51,11 @@ pub struct GpuMipMap {
 
 pub struct VoxelizePipeline {
 	voxelize_pipeline: ComputePipeline,
-	mipmap_pipeline: ComputePipeline,
+	clear_pipeline: ComputePipeline,
 	volume_layout: BindGroupLayout,
 	voxelize_layout: BindGroupLayout,
-	mipmap_layout: BindGroupLayout,
-	volume_texture_sampler: Sampler,
+	//mipmap_layout: BindGroupLayout,
+	//volume_texture_sampler: Sampler,
 }
 
 // TODO: fromworld to get the voxelization shader + buffers and descriptors ready
@@ -82,10 +82,10 @@ impl FromWorld for VoxelizePipeline {
 				BindGroupLayoutEntry {
 					binding: 0,
 					visibility: ShaderStage::COMPUTE,
-					ty: BindingType::StorageTexture {
-						format: VOLUME_TEXTURE_FORMAT,
-						access: StorageTextureAccess::WriteOnly,
-						view_dimension: TextureViewDimension::D3,
+					ty: BindingType::Buffer {
+						ty: BufferBindingType::Storage { read_only: false },
+						min_binding_size: None,
+						has_dynamic_offset: false,
 					},
 					count: None,
 				},
@@ -114,6 +114,7 @@ impl FromWorld for VoxelizePipeline {
 		});
 
 		// and for generating mipmaps
+		/* 
 		let mipmap_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
 			entries: &[
 				// for indicating what level we are at
@@ -131,9 +132,10 @@ impl FromWorld for VoxelizePipeline {
 			],
 			label: None,
 		});
+		*/
 
 		// next up, make the pipelines
-		let mipmap_pipeline_layout = render_device.create_pipeline_layout(&PipelineLayoutDescriptor {
+		let clear_pipeline_layout = render_device.create_pipeline_layout(&PipelineLayoutDescriptor {
 			label: None,
 			push_constant_ranges: &[],
 			bind_group_layouts: &[&volume_layout, /*&mipmap_layout*/],
@@ -145,11 +147,11 @@ impl FromWorld for VoxelizePipeline {
 			bind_group_layouts: &[&volume_layout, /*&voxelize_layout, &pbr_shaders.mesh_layout*/], // TODO: also needs the light layout + actual mesh info
 		});
 
-		let mipmap_pipeline = render_device.create_compute_pipeline(&ComputePipelineDescriptor {
+		let clear_pipeline = render_device.create_compute_pipeline(&ComputePipelineDescriptor {
 			label: None,
-			layout: Some(&mipmap_pipeline_layout),
+			layout: Some(&clear_pipeline_layout),
 			module: &shader_module,
-			entry_point: "mipmap",
+			entry_point: "clear",
 		});
 
 		let voxelize_pipeline = render_device.create_compute_pipeline(&ComputePipelineDescriptor {
@@ -162,9 +164,10 @@ impl FromWorld for VoxelizePipeline {
 		VoxelizePipeline {
 			volume_layout,
 			voxelize_pipeline,
-			mipmap_pipeline,
+			clear_pipeline,
 			voxelize_layout,
-			mipmap_layout,
+			// mipmap_layout,
+			/* 
 			volume_texture_sampler: render_device.create_sampler(&SamplerDescriptor {
 				address_mode_u: AddressMode::ClampToEdge,
 				address_mode_v: AddressMode::ClampToEdge,
@@ -174,6 +177,7 @@ impl FromWorld for VoxelizePipeline {
 				mipmap_filter: FilterMode::Linear,
 				..Default::default()
 			}),
+		*/
 		}
 	}
 }
@@ -200,9 +204,9 @@ pub fn extract_volumes(
 }
 
 pub struct ViewGiVolume {
-	pub volume_texture: Texture,
-	pub volume_texture_view: TextureView,
-	pub volume_texture_bind: BindGroup,
+	pub volume_buffer: Buffer,
+	//pub volume_buffer_bind: TextureView,
+	pub volume_buffer_bind_group: BindGroup,
 	//pub volume_buffer: Buffer,
 	//pub volume_buffer_bind: BindGroup,
 	pub gpu_binding_index: u32,
@@ -236,7 +240,17 @@ pub fn prepare_volumes(
 	// go over all views
 	for entity in views.iter() {
 
+		// get the buffer
+		// TODO: CACHE
+		let volume_buffer = render_device.create_buffer(&BufferDescriptor {
+			label: Some("Volume buffer"),
+			mapped_at_creation: false,
+			usage: BufferUsage::STORAGE,
+			size: volume.resolution as u64 * volume.resolution as u64 * volume.resolution as u64 * 16, // 16 here due to using a vec4<f32> TODO CORRECT SIZE
+		});
+
 		// get the volume texture for this view
+		/* 
 		let volume_texture = texture_cache.get(
 			&render_device,
 			TextureDescriptor {
@@ -260,14 +274,15 @@ pub fn prepare_volumes(
 			base_array_layer: 0,
 			array_layer_count: None,
 		});
+		*/
 
 		// set the volume texture bind group
-		let volume_texture_bind = Some(render_device.create_bind_group(&BindGroupDescriptor {
+		let volume_buffer_bind = Some(render_device.create_bind_group(&BindGroupDescriptor {
 			label: Some("volume texture bind"),
 			layout: &shaders.volume_layout,
 			entries: &[BindGroupEntry {
 				binding: 0,
-				resource: BindingResource::TextureView(&volume_texture_view)
+				resource: volume_buffer.as_entire_binding()
 			}],
 		}));
 
@@ -281,9 +296,9 @@ pub fn prepare_volumes(
 
 		// next up, add the gpu volume to the view
 		commands.entity(entity).insert(ViewGiVolume {
-			volume_texture: volume_texture.texture,
-			volume_texture_view,
-			volume_texture_bind: volume_texture_bind.unwrap(),
+			volume_buffer,
+			// volume_texture_view,
+			volume_buffer_bind_group: volume_buffer_bind.unwrap(),
 			gpu_binding_index: gi_meta.view_gi_volumes.push(gpu_volume),
 		});
 	}
@@ -342,11 +357,17 @@ impl Node for VoxelizePassNode {
 				label: None,
 			});
 
-			// we want to voxelize things
-			compute_pass.set_pipeline(&shaders.voxelize_pipeline);
+			// first, we want to clear the buffer
+			compute_pass.set_pipeline(&shaders.clear_pipeline);
 
 			// set the volume texture as our output
-			compute_pass.set_bind_group(0, &view_volume.volume_texture_bind.value(), &[]);
+			compute_pass.set_bind_group(0, &view_volume.volume_buffer_bind_group.value(), &[]);
+
+			// and run!
+			compute_pass.dispatch(32, 1, 1);
+
+			// we want to voxelize things
+			compute_pass.set_pipeline(&shaders.voxelize_pipeline);
 
 			// set the volume settings
 
@@ -357,15 +378,7 @@ impl Node for VoxelizePassNode {
 			// and run the shader!
 			compute_pass.dispatch(32, 32, 32);
 
-			// next up, we want to make mipmaps
-			// so set the pipeline for that
-			compute_pass.set_pipeline(&shaders.mipmap_pipeline);
-
-			// the volume texture is already bound, so we only need to bind the mipmaps
-
-			// and run!
-			// we need to do this a few times to do all mips
-			compute_pass.dispatch(16, 16, 16);
+			
 
 			// and drop it because we are done
 			drop(compute_pass);
