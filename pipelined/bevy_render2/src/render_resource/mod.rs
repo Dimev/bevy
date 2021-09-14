@@ -1,5 +1,6 @@
 mod bind_group;
 mod buffer;
+mod buffer_cache;
 mod buffer_vec;
 mod pipeline;
 mod render_resource_id;
@@ -8,6 +9,7 @@ mod uniform_vec;
 
 pub use bind_group::*;
 pub use buffer::*;
+pub use buffer_cache::*;
 pub use buffer_vec::*;
 pub use pipeline::*;
 pub use render_resource_id::*;

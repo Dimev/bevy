@@ -178,7 +178,6 @@ pub struct ViewGiVolume {
 #[derive(Default)]
 pub struct GiMeta {
 	pub view_gi_volumes: DynamicUniformVec<GpuGiVolume>,
-	pub gi_mipmaps: DynamicUniformVec<GpuGiVolume>,
 }
 
 // prepares a volume for each view
@@ -186,7 +185,7 @@ pub struct GiMeta {
 // here we get the volume for each view, + the texture associated with the volume
 pub fn prepare_volumes(
 	mut commands: Commands,
-	mut texture_cache: ResMut<TextureCache>,
+	mut buffer_cache: ResMut<BufferCache>,
 	render_device: Res<RenderDevice>,
 	render_queue: Res<RenderQueue>,
 	mut gi_meta: ResMut<GiMeta>,
@@ -203,7 +202,9 @@ pub fn prepare_volumes(
 
 		// get the buffer
 		// TODO: CACHE
-		let volume_buffer = render_device.create_buffer(&BufferDescriptor {
+		let volume_buffer = buffer_cache.get(
+			&render_device,
+			BufferDescriptor {
 			label: Some("Volume buffer"),
 			mapped_at_creation: false,
 			usage: BufferUsage::STORAGE,
@@ -217,7 +218,7 @@ pub fn prepare_volumes(
 			layout: &shaders.volume_layout,
 			entries: &[BindGroupEntry {
 				binding: 0,
-				resource: volume_buffer.as_entire_binding()
+				resource: volume_buffer.buffer.as_entire_binding()
 			}],
 		}));
 
@@ -231,26 +232,13 @@ pub fn prepare_volumes(
 
 		// next up, add the gpu volume to the view
 		commands.entity(entity).insert(ViewGiVolume {
-			volume_buffer,
+			volume_buffer: volume_buffer.buffer,
 			// volume_texture_view,
 			volume_buffer_bind_group: volume_buffer_bind.unwrap(),
 			gpu_binding_index: gi_meta.view_gi_volumes.push(gpu_volume),
 		});
 	}
-
-	// TODO: store the mipmap gen inside the view mipmpas, and for each view, also store the amount of mipmaps it needs
-	// OR do mip gen in the shader manually
-	//commands.entity(entity).insert(ViewGiVolumes {
-	//	volume_texture: volume_texture.texture,
-	//	volume_texture_view,
-	//	volumes: vec![],
-	//	gpu_volume_binding_index: gi_meta.view_gi_volumes.push(gpu_volume)
-	//});
-	// TODO: add the other stuff to this view, idk how yet
-
 }
-
-// TODO: find a way to make the render pass work
 
 // node that runs the voxelization pass
 pub struct VoxelizePassNode {
@@ -279,13 +267,8 @@ impl Node for VoxelizePassNode {
 		let shaders = world.get_resource::<VoxelizePipeline>().unwrap();
 		let meta = world.get_resource::<GiMeta>().unwrap();
 
-		// go over all volumes
+		// go over all views (happens outside this function, so we just need to get the relevant view)
 		if let Ok(view_volume) = self.main_query.get_manual(world, view_entity) {
-
-			// there's only one volume, so only one thing to do
-			// step 1: clear the texture
-			// TODO: wait for 10.0
-			// render_context.command_encoder.clear_texture(&view_volume.volume_texture, ImageSubresourceRange)
 
 			// next up, we want to voxelize all meshes, so start a new pipeline to do that
 			let mut compute_pass = render_context.command_encoder.begin_compute_pass(&ComputePassDescriptor {
