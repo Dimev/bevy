@@ -54,8 +54,6 @@ pub struct VoxelizePipeline {
 	clear_pipeline: ComputePipeline,
 	volume_layout: BindGroupLayout,
 	voxelize_layout: BindGroupLayout,
-	//mipmap_layout: BindGroupLayout,
-	//volume_texture_sampler: Sampler,
 }
 
 // TODO: fromworld to get the voxelization shader + buffers and descriptors ready
@@ -113,27 +111,6 @@ impl FromWorld for VoxelizePipeline {
 			label: None,
 		});
 
-		// and for generating mipmaps
-		/* 
-		let mipmap_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-			entries: &[
-				// for indicating what level we are at
-				BindGroupLayoutEntry {
-					binding: 0,
-					visibility: ShaderStage::COMPUTE,
-					ty: BindingType::Buffer {
-						ty: BufferBindingType::Uniform,
-						has_dynamic_offset: true,
-						min_binding_size: BufferSize::new(GpuMipMap::std140_size_static() as u64),
-					},
-					count: None, 
-				},
-
-			],
-			label: None,
-		});
-		*/
-
 		// next up, make the pipelines
 		let clear_pipeline_layout = render_device.create_pipeline_layout(&PipelineLayoutDescriptor {
 			label: None,
@@ -166,18 +143,6 @@ impl FromWorld for VoxelizePipeline {
 			voxelize_pipeline,
 			clear_pipeline,
 			voxelize_layout,
-			// mipmap_layout,
-			/* 
-			volume_texture_sampler: render_device.create_sampler(&SamplerDescriptor {
-				address_mode_u: AddressMode::ClampToEdge,
-				address_mode_v: AddressMode::ClampToEdge,
-				address_mode_w: AddressMode::ClampToEdge,
-				mag_filter: FilterMode::Nearest,
-				min_filter: FilterMode::Nearest,
-				mipmap_filter: FilterMode::Linear,
-				..Default::default()
-			}),
-		*/
 		}
 	}
 }
@@ -205,12 +170,8 @@ pub fn extract_volumes(
 
 pub struct ViewGiVolume {
 	pub volume_buffer: Buffer,
-	//pub volume_buffer_bind: TextureView,
 	pub volume_buffer_bind_group: BindGroup,
-	//pub volume_buffer: Buffer,
-	//pub volume_buffer_bind: BindGroup,
 	pub gpu_binding_index: u32,
-	// TODO: store offsets for the mipmap gen
 }
 
 // TODO: move this to have per-view textures, per view mipmaps too
@@ -246,35 +207,9 @@ pub fn prepare_volumes(
 			label: Some("Volume buffer"),
 			mapped_at_creation: false,
 			usage: BufferUsage::STORAGE,
+			// TODO: Proper data layout
 			size: volume.resolution as u64 * volume.resolution as u64 * volume.resolution as u64 * 16, // 16 here due to using a vec4<f32> TODO CORRECT SIZE
 		});
-
-		// get the volume texture for this view
-		/* 
-		let volume_texture = texture_cache.get(
-			&render_device,
-			TextureDescriptor {
-				size: Extent3d { width: volume.resolution as u32, height: volume.resolution as u32, depth_or_array_layers: volume.resolution as u32 * volume.num_lods as u32 },
-				mip_level_count: volume.resolution.next_power_of_two().trailing_zeros() + 1, // same as log2
-				sample_count: 1,
-				dimension: TextureDimension::D3,
-				format: VOLUME_TEXTURE_FORMAT,
-				usage: TextureUsage::SAMPLED | TextureUsage::STORAGE,
-				label: Some("Actual volume texture"),
-			}
-		);
-
-		let volume_texture_view = volume_texture.texture.create_view(&TextureViewDescriptor {
-			label: None,
-			format: None,
-			dimension: Some(TextureViewDimension::D3),
-			aspect: TextureAspect::All,
-			base_mip_level: 0,
-			mip_level_count: None,
-			base_array_layer: 0,
-			array_layer_count: None,
-		});
-		*/
 
 		// set the volume texture bind group
 		let volume_buffer_bind = Some(render_device.create_bind_group(&BindGroupDescriptor {
@@ -357,7 +292,7 @@ impl Node for VoxelizePassNode {
 				label: None,
 			});
 
-			// first, we want to clear the buffer
+			// first, we want to clear the buffer from potential previous content
 			compute_pass.set_pipeline(&shaders.clear_pipeline);
 
 			// set the volume texture as our output
