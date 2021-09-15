@@ -28,6 +28,23 @@ pub const LOCAL_WORKGROUP_SIZE: u32 = 64;
 // size of the data in the buffer
 pub const BUFFER_DATA_SIZE: u64 = 16; // 16, as we have 4 floats of 4 bytes long
 
+// helper function to get the volume size
+// we store the volume as follows:
+// resolution^3 buffers, linear encoding. We have num_lods of these
+// the rest is mipmaps, which subdivide until the last lod to 1
+pub fn get_num_voxels_in_volume(resolution: u64, lods: u64) -> u64 {
+
+	// base volume, aka the lods
+	let base_volume = resolution * resolution * resolution * lods;
+	
+	// then figure out the needed mipmaps
+	let num_mipmaps = resolution.next_power_of_two().trailing_zeros();
+
+	// this is just the geometric series, with a = resolution^3, r = 0.5, rewritten to work for integers
+	resolution * resolution * resolution * 2 * (1 - 0) // TODO FIX(r^0.5)
+
+}
+
 pub struct ExtractedGiVolume {
     size: f32,
     num_lods: u8,
@@ -203,7 +220,7 @@ pub fn prepare_volumes(
 	for entity in views.iter() {
 
 		// calculate the size of the buffer
-		let volume_buffer_size = volume.resolution as u32 * volume.resolution as u32 * volume.resolution as u32;
+		let volume_buffer_size = get_num_voxels_in_volume(volume.resolution as u64, volume.num_lods as u64) * BUFFER_DATA_SIZE;
 
 		// get the buffer
 		// TODO: CACHE
@@ -214,7 +231,7 @@ pub fn prepare_volumes(
 			mapped_at_creation: false,
 			usage: BufferUsage::STORAGE,
 			// TODO: Proper data layout
-			size: volume_buffer_size as u64, 
+			size: volume_buffer_size, 
 		});
 
 		// set the volume texture bind group
@@ -239,7 +256,7 @@ pub fn prepare_volumes(
 		commands.entity(entity).insert(ViewGiVolume {
 			volume_buffer: volume_buffer.buffer,
 			volume_buffer_bind_group: volume_buffer_bind.unwrap(),
-			volume_buffer_size,
+			volume_buffer_size: volume_buffer_size as u32,
 			gpu_binding_index: gi_meta.view_gi_volumes.push(gpu_volume),
 		});
 	}
