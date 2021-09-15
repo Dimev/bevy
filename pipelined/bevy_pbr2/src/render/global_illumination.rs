@@ -22,8 +22,11 @@ use bevy_transform::components::GlobalTransform;
 /// maximum number of cascades/lods the Gi volumes can have
 pub const MAX_NUM_LODS: u8 = 8;
 
-/// the format to use for the volume texture
-pub const VOLUME_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba32Float; // TODO: see if 16 bit floats work?
+/// local work group size of the clear and rasterize shader
+pub const LOCAL_WORKGROUP_SIZE: u32 = 64;
+
+// size of the data in the buffer
+pub const BUFFER_DATA_SIZE: u64 = 16; // 16, as we have 4 floats of 4 bytes long
 
 pub struct ExtractedGiVolume {
     size: f32,
@@ -115,7 +118,7 @@ impl FromWorld for VoxelizePipeline {
 		let clear_pipeline_layout = render_device.create_pipeline_layout(&PipelineLayoutDescriptor {
 			label: None,
 			push_constant_ranges: &[],
-			bind_group_layouts: &[&volume_layout, /*&mipmap_layout*/],
+			bind_group_layouts: &[&volume_layout],
 		});
 
 		let voxelize_pipeline_layout = render_device.create_pipeline_layout(&PipelineLayoutDescriptor {
@@ -147,8 +150,6 @@ impl FromWorld for VoxelizePipeline {
 	}
 }
 
-
-
 // get the volumes from the world ecs
 pub fn extract_volumes(
 	mut commands: Commands,
@@ -171,6 +172,7 @@ pub fn extract_volumes(
 pub struct ViewGiVolume {
 	pub volume_buffer: Buffer,
 	pub volume_buffer_bind_group: BindGroup,
+	pub volume_buffer_size: u32,
 	pub gpu_binding_index: u32,
 }
 
@@ -200,6 +202,9 @@ pub fn prepare_volumes(
 	// go over all views
 	for entity in views.iter() {
 
+		// calculate the size of the buffer
+		let volume_buffer_size = volume.resolution as u32 * volume.resolution as u32 * volume.resolution as u32;
+
 		// get the buffer
 		// TODO: CACHE
 		let volume_buffer = buffer_cache.get(
@@ -209,7 +214,7 @@ pub fn prepare_volumes(
 			mapped_at_creation: false,
 			usage: BufferUsage::STORAGE,
 			// TODO: Proper data layout
-			size: volume.resolution as u64 * volume.resolution as u64 * volume.resolution as u64 * 16, // 16 here due to using a vec4<f32> TODO CORRECT SIZE
+			size: volume_buffer_size as u64, 
 		});
 
 		// set the volume texture bind group
@@ -233,8 +238,8 @@ pub fn prepare_volumes(
 		// next up, add the gpu volume to the view
 		commands.entity(entity).insert(ViewGiVolume {
 			volume_buffer: volume_buffer.buffer,
-			// volume_texture_view,
 			volume_buffer_bind_group: volume_buffer_bind.unwrap(),
+			volume_buffer_size,
 			gpu_binding_index: gi_meta.view_gi_volumes.push(gpu_volume),
 		});
 	}
@@ -282,9 +287,7 @@ impl Node for VoxelizePassNode {
 			compute_pass.set_bind_group(0, &view_volume.volume_buffer_bind_group.value(), &[]);
 
 			// and run!
-			compute_pass.dispatch(32, 1, 1);
-
-			println!("dispatched");
+			compute_pass.dispatch(view_volume.volume_buffer_size / LOCAL_WORKGROUP_SIZE, 1, 1);
 
 			// we want to voxelize things
 			compute_pass.set_pipeline(&shaders.voxelize_pipeline);
