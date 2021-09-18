@@ -18,6 +18,7 @@ use crate::{
     mesh::MeshPlugin,
     render_graph::RenderGraph,
     renderer::render_system,
+	render_resource::{BufferCache, update_buffer_cache_system},
     shader::ShaderPlugin,
     texture::ImagePlugin,
     view::{ViewPlugin, WindowRenderPlugin},
@@ -114,7 +115,9 @@ impl Plugin for RenderPlugin {
             .insert_resource(device)
             .insert_resource(queue)
             .insert_resource(asset_server)
-            .init_resource::<RenderGraph>();
+            .init_resource::<RenderGraph>()
+			.init_resource::<BufferCache>()
+			.add_system_to_stage(RenderStage::Cleanup, update_buffer_cache_system);
 
         app.add_sub_app(render_app, move |app_world, render_app| {
             // reserve all existing app entities for use in render_app

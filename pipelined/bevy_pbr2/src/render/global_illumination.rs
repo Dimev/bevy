@@ -40,9 +40,16 @@ pub fn get_num_voxels_in_volume(resolution: u64, lods: u64) -> u64 {
 	// then figure out the needed mipmaps
 	let num_mipmaps = resolution.next_power_of_two().trailing_zeros();
 
-	// this is just the geometric series, with a = resolution^3, r = 0.5, rewritten to work for integers
-	resolution * resolution * resolution * 2 * (1 - 0) // TODO FIX(r^0.5)
-
+	// we can do this with the geometric series, but that's a bit complex with integers, so we resolve to this
+	// TODO: limits
+	// we probably don't want all mips, and we also don't want to run out of vram
+	base_volume + (0..num_mipmaps)
+		.into_iter()
+		.map(|i| {
+			let mip_resolution = resolution >> (i + 1);
+			mip_resolution * mip_resolution * mip_resolution
+		})
+		.sum::<u64>()
 }
 
 pub struct ExtractedGiVolume {
@@ -177,6 +184,7 @@ pub fn extract_volumes(
 	if let Ok((_, volume, transform)) = volumes.single() {
 
 		// and insert it
+		// TODO: ADD LIMITS
 		commands.insert_resource(ExtractedGiVolume {
 			num_lods: volume.num_lods.min(MAX_NUM_LODS),
 			size: volume.size,

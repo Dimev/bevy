@@ -158,7 +158,7 @@ fn setup(
 	commands.spawn_bundle(GiVolumeBundle {
 		gi_volume: GiVolume {
 			size: 32.0,
-			resolution: 128,
+			resolution: 64,
 			num_lods: 4
 		},
 		..Default::default()
