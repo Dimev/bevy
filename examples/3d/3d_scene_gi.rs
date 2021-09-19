@@ -105,32 +105,6 @@ fn setup(
         .insert(Movable);
 
     // light
-    commands
-        .spawn_bundle(PointLightBundle {
-            // transform: Transform::from_xyz(5.0, 8.0, 2.0),
-            transform: Transform::from_xyz(1.0, 2.0, 0.0),
-            point_light: PointLight {
-                color: Color::GRAY,
-                ..Default::default()
-            },
-            ..Default::default()
-        })
-        .with_children(|builder| {
-            builder.spawn_bundle(PbrBundle {
-                mesh: meshes.add(Mesh::from(shape::UVSphere {
-                    radius: 0.1,
-                    ..Default::default()
-                })),
-                material: materials.add(StandardMaterial {
-                    base_color: Color::RED,
-                    emissive: Color::rgba_linear(100.0, 0.0, 0.0, 0.0),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            });
-        });
-
-    // light
     const HALF_SIZE: f32 = 10.0;
     commands.spawn_bundle(DirectionalLightBundle {
         directional_light: DirectionalLight {

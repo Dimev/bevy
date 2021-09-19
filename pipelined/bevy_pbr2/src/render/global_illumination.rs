@@ -13,6 +13,8 @@ use bevy_render2::{
 	render_phase::{
         Draw, DrawFunctionId, DrawFunctions, PhaseItem, RenderPhase, TrackedRenderPass,
     },
+	render_asset::RenderAssets,
+	mesh::*,
 	view::{ExtractedView, ViewMeta, ViewUniformOffset},
 };
 
@@ -205,6 +207,7 @@ pub struct ViewGiVolume {
 #[derive(Default)]
 pub struct GiMeta {
 	pub view_gi_volumes: DynamicUniformVec<GpuGiVolume>,
+	pub view_gi_bind_group: Option<BindGroup>,
 }
 
 // prepares a volume for each view
@@ -268,6 +271,21 @@ pub fn prepare_volumes(
 			gpu_binding_index: gi_meta.view_gi_volumes.push(gpu_volume),
 		});
 	}
+
+	gi_meta.view_gi_volumes.write_buffer(&render_queue);
+
+	/* 
+	gi.view_bind_group.get_or_insert_with(|| {
+        render_device.create_bind_group(&BindGroupDescriptor {
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: view_meta.uniforms.binding(),
+            }],
+            label: None,
+            layout: &shadow_pipeline.view_layout,
+        })
+    });
+	*/
 }
 
 // node that runs the voxelization pass
@@ -296,6 +314,7 @@ impl Node for VoxelizePassNode {
 		let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
 		let shaders = world.get_resource::<VoxelizePipeline>().unwrap();
 		let meta = world.get_resource::<GiMeta>().unwrap();
+		let assets = world.get_resource::<RenderAssets<Mesh>>().unwrap();
 
 		// go over all views (happens outside this function, so we just need to get the relevant view)
 		if let Ok(view_volume) = self.main_query.get_manual(world, view_entity) {
@@ -318,13 +337,18 @@ impl Node for VoxelizePassNode {
 			compute_pass.set_pipeline(&shaders.voxelize_pipeline);
 
 			// set the volume settings
+			//compute_pass.set_bind_group(1, meta.vol, &[view_volume.gpu_binding_index]);
 
 			// go over all meshes
-			// TODO
+			for (handle, gpu_mesh) in assets {
+
+
+
+			}
 
 
 			// and run the shader!
-			compute_pass.dispatch(32, 32, 32);
+			//compute_pass.dispatch(32, 32, 32);
 
 			
 

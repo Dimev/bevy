@@ -553,14 +553,14 @@ impl RenderAsset for Mesh {
     ) -> Result<Self::PreparedAsset, PrepareAssetError<Self::ExtractedAsset>> {
         let vertex_buffer_data = mesh.get_vertex_buffer_data();
         let vertex_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
-            usage: BufferUsage::VERTEX,
+            usage: BufferUsage::VERTEX | BufferUsage::STORAGE,
             label: None,
             contents: &vertex_buffer_data,
         });
 
         let index_info = mesh.get_index_buffer_bytes().map(|data| GpuIndexInfo {
             buffer: render_device.create_buffer_with_data(&BufferInitDescriptor {
-                usage: BufferUsage::INDEX,
+                usage: BufferUsage::INDEX | BufferUsage::STORAGE,
                 contents: data,
                 label: None,
             }),

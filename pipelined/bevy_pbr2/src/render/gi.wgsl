@@ -9,6 +9,13 @@ struct Volume {
 	voxels: array<Voxel>;
 };
 
+// what a vertex stores
+struct Vertex {
+    position: vec3<f32>;
+    normal: vec3<f32>;
+    uv: vec2<f32>;
+};
+
 // the volume buffer to write to
 [[group(0), binding(0)]]
 var<storage> volume_buffer: [[access(read_write)]] Volume;
